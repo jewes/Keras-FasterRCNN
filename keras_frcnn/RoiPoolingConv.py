@@ -32,7 +32,7 @@ class RoiPoolingConv(Layer):
         self.dim_ordering = K.image_dim_ordering()
         assert self.dim_ordering in {'tf', 'th'}, 'dim_ordering must be in {tf, th}'
 
-        self.pool_size = pool_size
+        self.pool_size = pool_size  # size = 7
         self.num_rois = num_rois
 
         super(RoiPoolingConv, self).__init__(**kwargs)
@@ -53,13 +53,14 @@ class RoiPoolingConv(Layer):
 
         assert(len(x) == 2)
 
-        img = x[0]
+        img = x[0]  # backbone network output feature map
         rois = x[1]
 
         input_shape = K.shape(img)
 
         outputs = []
 
+        # did you check num_rois vs len(rois)?
         for roi_idx in range(self.num_rois):
 
             x = rois[0, roi_idx, 0]
@@ -105,6 +106,7 @@ class RoiPoolingConv(Layer):
                 w = K.cast(w, 'int32')
                 h = K.cast(h, 'int32')
 
+                # extract the roi image from the backbone feature map, and resize to 7 x 7 x c
                 rs = tf.image.resize_images(img[:, y:y+h, x:x+w, :], (self.pool_size, self.pool_size))
                 outputs.append(rs)
 

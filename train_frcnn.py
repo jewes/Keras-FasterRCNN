@@ -20,7 +20,7 @@ from keras.utils import generic_utils
 from keras.callbacks import TensorBoard
 
 
-# tensorboard 로그 작성 함수
+# tensorboard
 def write_log(callback, names, logs, batch_no):
     for name, value in zip(names, logs):
         summary = tf.Summary()
@@ -218,13 +218,16 @@ for epoch_num in range(num_epochs):
             if mean_overlapping_bboxes == 0:
                 print('RPN is not producing bounding boxes that overlap the ground truth boxes. Check RPN settings or keep training.')
 
-        # data generator에서 X, Y, image 가져오기
+        # data generator, generate rpn proposal training data
         X, Y, img_data = next(data_gen_train)
 
+        # train the rpn network
         loss_rpn = model_rpn.train_on_batch(X, Y)
         write_log(callback, ['rpn_cls_loss', 'rpn_reg_loss'], loss_rpn, train_step)
 
-        P_rpn = model_rpn.predict_on_batch(X)
+        # it returns the anchor objectness and bbox
+        # x_class, x_regr, base_layers
+        P_rpn = model_rpn.predict_on_batch(X)  # this is the rpn network output.
 
         R = roi_helpers.rpn_to_roi(P_rpn[0], P_rpn[1], C, K.image_dim_ordering(), use_regr=True, overlap_thresh=0.7, max_boxes=300)
         # note: calc_iou converts from (x1,y1,x2,y2) to (x,y,w,h) format

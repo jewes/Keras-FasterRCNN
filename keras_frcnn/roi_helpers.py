@@ -7,7 +7,14 @@ import time
 
 
 def calc_iou(R, img_data, C, class_mapping):
+    """
 
+    :param R: [boxes, prob]. boxes shape = [num_anchor, 4]
+    :param img_data:
+    :param C:
+    :param class_mapping:
+    :return:
+    """
     bboxes = img_data['bboxes']
     (width, height) = (img_data['width'], img_data['height'])
     # get image dimensions for resizing
@@ -156,6 +163,15 @@ def apply_regr_np(X, T):
 
 
 def non_max_suppression_fast(boxes, probs, overlap_thresh=0.9, max_boxes=300):
+    """
+    先找到prob最大的那个box，并加入到候选列表中。然后将其他所有与之iou相比大于0.9的box全部给过滤掉的。相当于就是保留了prob最高的，
+    去掉与之类似的。
+    :param boxes:
+    :param probs:
+    :param overlap_thresh:
+    :param max_boxes:
+    :return:
+    """
     # code used from here: http://www.pyimagesearch.com/2015/02/16/faster-non-maximum-suppression-python/
     # if there are no boxes, return an empty list
     if len(boxes) == 0:
@@ -195,7 +211,8 @@ def non_max_suppression_fast(boxes, probs, overlap_thresh=0.9, max_boxes=300):
 
         # find the intersection
 
-        xx1_int = np.maximum(x1[i], x1[idxs[:last]])
+        # 采用了向量计算，因此速度提高了不少。
+        xx1_int = np.maximum(x1[i], x1[idxs[:last]])  # 最后一个box的x值与其他元素x值之间相比的最大值
         yy1_int = np.maximum(y1[i], y1[idxs[:last]])
         xx2_int = np.minimum(x2[i], x2[idxs[:last]])
         yy2_int = np.minimum(y2[i], y2[idxs[:last]])
@@ -225,6 +242,21 @@ def non_max_suppression_fast(boxes, probs, overlap_thresh=0.9, max_boxes=300):
 
 
 def rpn_to_roi(rpn_layer, regr_layer, C, dim_ordering, use_regr=True, max_boxes=300,overlap_thresh=0.9):
+    """
+    anchor在feature_map scale的的长宽是固定的，这个函数是将rpn返回的anchor，转成roi，
+    去掉了object_ness = 0 的 anchor，并用nms做进一步的过滤。
+    :param rpn_layer: x_class?
+    :param regr_layer: x_regr?
+    :param C:
+    :param dim_ordering:
+    :param use_regr:
+    :param max_boxes:
+    :param overlap_thresh:
+    :return:
+    """
+
+    # rpn_layer shape: [1, row, col, num_anchors]
+    # regr_layer shape [1, row, col, num_anchors * 4]
 
     regr_layer = regr_layer / C.std_scaling
 
@@ -240,6 +272,9 @@ def rpn_to_roi(rpn_layer, regr_layer, C, dim_ordering, use_regr=True, max_boxes=
         (rows, cols) = rpn_layer.shape[1:3]
 
     curr_layer = 0
+
+    # A shape: [4, row, col, num_anchors]
+    # 每个anchor在每个cell上的xmin,ymin,xmax,ymax
     if dim_ordering == 'tf':
         A = np.zeros((4, rpn_layer.shape[1], rpn_layer.shape[2], rpn_layer.shape[3]))
     elif dim_ordering == 'th':
@@ -248,29 +283,47 @@ def rpn_to_roi(rpn_layer, regr_layer, C, dim_ordering, use_regr=True, max_boxes=
     for anchor_size in anchor_sizes:
         for anchor_ratio in anchor_ratios:
 
-            anchor_x = (anchor_size * anchor_ratio[0])/C.rpn_stride
-            anchor_y = (anchor_size * anchor_ratio[1])/C.rpn_stride
+            anchor_x = (anchor_size * anchor_ratio[0])/C.rpn_stride  # anchor 缩放到 feature map上长度
+            anchor_y = (anchor_size * anchor_ratio[1])/C.rpn_stride  # anchor 缩放到 feature map上高度
             if dim_ordering == 'th':
                 regr = regr_layer[0, 4 * curr_layer:4 * curr_layer + 4, :, :]
             else:
-                regr = regr_layer[0, :, :, 4 * curr_layer:4 * curr_layer + 4]
-                regr = np.transpose(regr, (2, 0, 1))
+                regr = regr_layer[0, :, :, 4 * curr_layer:4 * curr_layer + 4]  # 获取到当前尺寸anchor在所有位置上的regression_target
+                regr = np.transpose(regr, (2, 0, 1))  # 相当于是把xywh放到了第0维
 
-            X, Y = np.meshgrid(np.arange(cols),np. arange(rows))
+            """
+            X = [
+              [0, 1, 2, 3 ...],
+              [0, 1, 2, 3 ...],
+              [0, 1, 2, 3 ...],
+            ]
+            
+            Y = [
+              [0, 0, 0, ...],
+              [1, 1, 1, ...],
+              [2, 2, 2, ...],
+              [...]
+            ]
+            """
+            X, Y = np.meshgrid(np.arange(cols), np. arange(rows))
 
-            A[0, :, :, curr_layer] = X - anchor_x/2
-            A[1, :, :, curr_layer] = Y - anchor_y/2
-            A[2, :, :, curr_layer] = anchor_x
-            A[3, :, :, curr_layer] = anchor_y
+            # 计算anchor在每个cell上的xywh
+            # A.shape = [4, row, cols, num_anchor]
+            A[0, :, :, curr_layer] = X - anchor_x/2  # x
+            A[1, :, :, curr_layer] = Y - anchor_y/2  # y
+            A[2, :, :, curr_layer] = anchor_x        # w
+            A[3, :, :, curr_layer] = anchor_y        # h
 
             if use_regr:
                 A[:, :, :, curr_layer] = apply_regr_np(A[:, :, :, curr_layer], regr)
 
+            # 将xywh -> xmin, ymin, xmax, ymax
             A[2, :, :, curr_layer] = np.maximum(1, A[2, :, :, curr_layer])
             A[3, :, :, curr_layer] = np.maximum(1, A[3, :, :, curr_layer])
             A[2, :, :, curr_layer] += A[0, :, :, curr_layer]
             A[3, :, :, curr_layer] += A[1, :, :, curr_layer]
 
+            # 确保xy值不越界
             A[0, :, :, curr_layer] = np.maximum(0, A[0, :, :, curr_layer])
             A[1, :, :, curr_layer] = np.maximum(0, A[1, :, :, curr_layer])
             A[2, :, :, curr_layer] = np.minimum(cols-1, A[2, :, :, curr_layer])
@@ -278,8 +331,9 @@ def rpn_to_roi(rpn_layer, regr_layer, C, dim_ordering, use_regr=True, max_boxes=
 
             curr_layer += 1
 
-    all_boxes = np.reshape(A.transpose((0, 3, 1,2)), (4, -1)).transpose((1, 0))
-    all_probs = rpn_layer.transpose((0, 3, 1, 2)).reshape((-1))
+    # A.transpose -> 转置维4行xn列（n=num_anchor*rows*cols），然后再转置成n行x4列
+    all_boxes = np.reshape(A.transpose((0, 3, 1, 2)), (4, -1)).transpose((1, 0))
+    all_probs = rpn_layer.transpose((0, 3, 1, 2)).reshape((-1))  # 转置成1维
 
     x1 = all_boxes[:, 0]
     y1 = all_boxes[:, 1]
@@ -288,6 +342,7 @@ def rpn_to_roi(rpn_layer, regr_layer, C, dim_ordering, use_regr=True, max_boxes=
 
     idxs = np.where((x1 - x2 >= 0) | (y1 - y2 >= 0))
 
+    # 删除不合理的box
     all_boxes = np.delete(all_boxes, idxs, 0)
     all_probs = np.delete(all_probs, idxs, 0)
 
