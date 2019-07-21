@@ -50,4 +50,4 @@ class FRCNN(object):
 if __name__ == '__main__':
     frcnn = FRCNN()
     rpn_model = frcnn.build_rpn_model(9)
-    print(rpn_model.summary())
+    print(rpn_model.summary(positions=[.3, .6, .8, 1.]))

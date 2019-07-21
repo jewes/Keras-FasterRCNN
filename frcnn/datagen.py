@@ -5,7 +5,12 @@ import numpy as np
 
 
 # image resize
-def get_new_img_size(width, height, img_min_side=300):
+from keras_applications import imagenet_utils
+from .kitti_parser import KittiParser
+from .hyper_params import H
+
+
+def get_new_img_size(width, height, img_min_side):
     if width <= height:
         f = float(img_min_side) / width
         resized_height = int(f * height)
@@ -50,34 +55,51 @@ def intersection(ai, bi):
 
 class TrainDataGenerator(object):
 
-    def __init__(self, train_dir, down_scale):
-        # todo - load all the training images
-        self.down_scale = down_scale
+    def __init__(self, data_dir, annotation_format='kitti'):
+        self.annotation_data = None
+        if 'kitti' == annotation_format:
+            annotation_parser = KittiParser(data_dir)
+            self.annotation_data = annotation_parser.get_annotations()
+
+        if self.annotation_data is None:
+            raise ValueError('missing annotation')
 
     def get_train_datagen(self):
-        # load all the image data
-        all_img_data = []
         while True:
             # shuffle it in every epoch
-            random.shuffle(all_img_data)
+            random.shuffle(self.annotation_data)
 
             # ensure every image is used for training at least once.
-            for img_data in all_img_data:
+            for img_data in self.annotation_data:
                 x_img = cv2.imread(img_data['file_path'])
-                w, h = img_data['width'], img_data['height']
-                resized_w, resized_h = get_new_img_size(w, h)
-                x_img = cv2.resize(x_img, (resized_w, resized_h))
+                w, h = x_img.shape[:2]
+                resized_w, resized_h = get_new_img_size(w, h, img_min_side=H.min_img_width)
 
+                # prepare X
+                x_img = cv2.resize(x_img, (resized_w, resized_h))
+                x_img = cv2.cvtColor(x_img, cv2.COLOR_BGR2RGB)
+                x_img = np.expand_dims(x_img, axis=0)
+                x_img = imagenet_utils.preprocess_input(x_img, mode='tf')
+
+                # prepare Y
                 # now calculates the rpn gt cls and regression box
                 y_rpn_cls, y_rpn_regr = self.calc_rpn_gt(resized_w, resized_h, w, h, img_data['bboxes'])
 
+                y_rpn_regr[:, y_rpn_regr.shape[1]//2:, :, :] *= 4.0  # scaling the regression target, i don't know why
+
+                # change shape to NWHC format
+                y_rpn_cls = np.transpose(y_rpn_cls, (0, 2, 3, 1))
+                y_rpn_regr = np.transpose(y_rpn_regr, (0, 2, 3, 1))
+
+                yield x_img, [y_rpn_cls, y_rpn_regr]
+
     def calc_rpn_gt(self, resized_width, resized_height, w, h, gt_bboxes,
-                    rpn_min_overlap=0.3, rpn_max_overlap=0.7, num_region=256):
-        anchor_sizes = [128, 256, 512]
-        anchor_ratios = [[1, 1], [1, 2], [2, 1]]
+                    rpn_min_overlap=H.rpn_min_overlap, rpn_max_overlap=H.rpn_max_overlap, num_region=H.rpn_num_regions):
+        anchor_sizes = H.anchor_box_scales
+        anchor_ratios = H.anchor_box_ratios
         num_anchors = len(anchor_sizes) * len(anchor_ratios)
 
-        output_width, output_height = int(resized_width / self.down_scale), int(resized_height / self.down_scale)
+        output_width, output_height = int(resized_width / H.down_scale), int(resized_height / H.down_scale)
 
         num_bbox = len(gt_bboxes)
         gta = np.zeros((num_bbox, 4))  # store the gt bboxes
@@ -109,15 +131,15 @@ class TrainDataGenerator(object):
 
                 for fx in range(output_width):
                     # self.down_scale * (fx + 0.5) is the center_x of the anchor box
-                    anchor_xmin = self.down_scale * (fx + 0.5) - anchor_w / 2
-                    anchor_xmax = self.down_scale * (fx + 0.5) + anchor_w / 2
+                    anchor_xmin = H.down_scale * (fx + 0.5) - anchor_w / 2
+                    anchor_xmax = H.down_scale * (fx + 0.5) + anchor_w / 2
 
                     # anchor xmin or xmax exceeds the image
                     if anchor_xmin < 0 or anchor_xmax > resized_width:
                         continue
                     for fy in range(output_height):
-                        anchor_ymin = self.down_scale * (fy + 0.5) - anchor_h / 2
-                        anchor_ymax = self.down_scale * (fy + 0.5) + anchor_h / 2
+                        anchor_ymin = H.down_scale * (fy + 0.5) - anchor_h / 2
+                        anchor_ymax = H.down_scale * (fy + 0.5) + anchor_h / 2
 
                         if anchor_ymin < 0 or anchor_ymax > resized_height:
                             continue
@@ -235,42 +257,13 @@ class TrainDataGenerator(object):
             val_locs = random.sample(range(num_negative_locs), num_negative_locs - num_positive_locs)  # neg:pos = 1:1
             y_is_box_valid[0, neg_locs[0][val_locs], neg_locs[1][val_locs], neg_locs[2][val_locs]] = 0
 
+        # y_rpn_cls shape: (1, 18, rows, cols), 1st dimension: is_box_valid, y_rpn_overlap for each anchor
+        # merge them together, which will be used in computing loss.
+        # y_true and y_pred is not 1 vs 1 mapping
         y_rpn_cls = np.concatenate([y_is_box_valid, y_rpn_overlap], axis=1)
+
+        # y_rpn_regr shape: (1, 72, rows, cols)?
         y_rpn_regr = np.concatenate([np.repeat(y_rpn_overlap, 4, axis=1), y_rpn_regr], axis=1)
 
         return np.copy(y_rpn_cls), np.copy(y_rpn_regr)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
