@@ -27,13 +27,13 @@ class KittiParser(object):
             pbar.update(1)
             filename, ext = os.path.splitext(label_file)
             image_path = os.path.join(self.images_dir, "{}.jpg".format(filename))
-            if os.path.exists(image_path):
+            if not os.path.exists(image_path):
                 print("Warn: no corresponding images at {}".format(image_path))
                 continue
 
             bboxes = []
             label_file_path = os.path.join(self.labels_dir, label_file)
-            with os.open(label_file_path) as fp:
+            with open(label_file_path, 'r') as fp:
                 for line in fp:
                     segments = line.strip().split()
                     category = segments[0]
@@ -43,10 +43,10 @@ class KittiParser(object):
                     ymax = segments[7]
                     bboxes.append({
                         'class': category,
-                        'xmin': xmin,
-                        'ymin': ymin,
-                        'xmax': xmax,
-                        'ymax': ymax
+                        'xmin': int(xmin),
+                        'ymin': int(ymin),
+                        'xmax': int(xmax),
+                        'ymax': int(ymax)
                     })
                 if len(bboxes) > 0:
                     annotations.append({

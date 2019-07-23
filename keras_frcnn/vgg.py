@@ -115,3 +115,10 @@ def classifier(base_layers, input_rois, num_rois, nb_classes = 21, trainable=Fal
     return [out_class, out_regr]
 
 
+if __name__ == '__main__':
+    from keras.models import Model
+    input_image = Input(shape=(None, None, 3))
+    backbone = nn_base(input_tensor=input_image, trainable=True)
+    rpnnet = rpn(backbone, 9)
+    model = Model(inputs=input_image, outputs=rpnnet)
+    print(model.summary(positions=[.3, .6, .8, 1.]))

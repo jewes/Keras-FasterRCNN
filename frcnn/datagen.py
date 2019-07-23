@@ -5,7 +5,7 @@ import numpy as np
 
 
 # image resize
-from keras_applications import imagenet_utils
+from keras.applications import imagenet_utils
 from .kitti_parser import KittiParser
 from .hyper_params import H
 
@@ -71,7 +71,14 @@ class TrainDataGenerator(object):
 
             # ensure every image is used for training at least once.
             for img_data in self.annotation_data:
-                x_img = cv2.imread(img_data['file_path'])
+                file_path = img_data.get('file_path')
+                print("reading image {}".format(file_path))
+
+                x_img = cv2.imread(file_path)
+                if x_img is None:
+                    print("error: reading image {} failed.".format(file_path))
+                    continue
+
                 w, h = x_img.shape[:2]
                 resized_w, resized_h = get_new_img_size(w, h, img_min_side=H.min_img_width)
 
