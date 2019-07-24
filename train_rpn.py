@@ -4,6 +4,7 @@ from frcnn.hyper_params import H
 from frcnn.datagen import TrainDataGenerator
 from frcnn import losses as losses
 
+
 if __name__ == '__main__':
     num_epochs = 10
 
@@ -18,7 +19,10 @@ if __name__ == '__main__':
     for idx_epoch in range(num_epochs):
         print('Epoch {}/{}'.format(idx_epoch + 1, num_epochs))
 
-        while True:
+        step = 0
+        while step < 100:
             X, Y = next(train_datagen)
             loss_rpn = model_rpn.train_on_batch(X, Y)
-            print('Epoch {}, rpn_loss = {}'.format(idx_epoch + 1, loss_rpn))
+            step += 1
+
+        print('Epoch {}, rpn_loss = {}'.format(idx_epoch + 1, loss_rpn))

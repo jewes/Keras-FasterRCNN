@@ -72,14 +72,13 @@ class TrainDataGenerator(object):
             # ensure every image is used for training at least once.
             for img_data in self.annotation_data:
                 file_path = img_data.get('file_path')
-                print("reading image {}".format(file_path))
 
                 x_img = cv2.imread(file_path)
                 if x_img is None:
                     print("error: reading image {} failed.".format(file_path))
                     continue
 
-                w, h = x_img.shape[:2]
+                h, w = x_img.shape[:2]
                 resized_w, resized_h = get_new_img_size(w, h, img_min_side=H.min_img_width)
 
                 # prepare X
@@ -162,8 +161,8 @@ class TrainDataGenerator(object):
                                                                  gta[idx_bbox, 3]
 
                             # the iou between the current anchor and the gt box
-                            current_iou = iou([gt_xmin, gt_xmax, gt_ymin, gt_ymax],
-                                              [anchor_xmin, anchor_xmax, anchor_ymin, anchor_ymax])
+                            current_iou = iou([gt_xmin, gt_ymin, gt_xmax, gt_ymax],
+                                              [anchor_xmin, anchor_ymin, anchor_xmax, anchor_ymax])
 
                             # find a good match anchor box
                             if current_iou > best_iou_for_bbox[idx_bbox] or current_iou > rpn_max_overlap:
