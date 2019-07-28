@@ -229,8 +229,13 @@ for epoch_num in range(num_epochs):
         # x_class, x_regr, base_layers
         P_rpn = model_rpn.predict_on_batch(X)  # this is the rpn network output.
 
+        # R 是roi boexes，shape = (N, 4)，format = xmin, ymin, xmax, ymax, 尺度是feature map大小的尺度
+        # those are the boxes proposed by the RPN network
         R = roi_helpers.rpn_to_roi(P_rpn[0], P_rpn[1], C, K.image_dim_ordering(), use_regr=True, overlap_thresh=0.7, max_boxes=300)
         # note: calc_iou converts from (x1,y1,x2,y2) to (x,y,w,h) format
+        # X2 -> roi boxes
+        # Y1 -> one-hot class labels
+        # Y2 -> one-hot regression target
         X2, Y1, Y2, IouS = roi_helpers.calc_iou(R, img_data, C, class_mapping)
 
         if X2 is None:

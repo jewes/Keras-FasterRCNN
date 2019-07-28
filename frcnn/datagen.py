@@ -10,6 +10,77 @@ from .kitti_parser import KittiParser
 from .hyper_params import H
 
 
+def process_image(file_path):
+    x_img = cv2.imread(file_path)
+    if x_img is None:
+        print("error: reading image {} failed.".format(file_path))
+        return None, None, None, None, None
+
+    h, w = x_img.shape[:2]
+    resized_w, resized_h = get_new_img_size(w, h, img_min_side=H.min_img_width)
+
+    # prepare X
+    x_img = cv2.resize(x_img, (resized_w, resized_h))
+    x_img = cv2.cvtColor(x_img, cv2.COLOR_BGR2RGB)
+    x_img = np.expand_dims(x_img, axis=0)
+    x_img = imagenet_utils.preprocess_input(x_img, mode='tf')
+    return x_img, w, h, resized_w, resized_h
+
+
+def gen_anchor_map(output_width, output_height, resized_width, resized_height, rpn_regr):
+    """
+    calculate the anchor cx, cy, w, h
+    :param output_width:
+    :param output_height:
+    :param resized_width:
+    :param resized_height:
+    :return:
+    """
+    anchor_sizes = H.anchor_box_scales
+    anchor_ratios = H.anchor_box_ratios
+    num_anchor = H.num_anchor
+
+    # store the anchor cx, cy, w, h
+    M = np.zeros((4, output_height, output_width, num_anchor))
+    current_layer = 0
+    for idx_anchor_size, anchor_size in enumerate(anchor_sizes):
+        for idx_anchor_ratio, anchor_ratio in enumerate(anchor_ratios):
+            anchor_w = anchor_size * anchor_ratio[0]
+            anchor_h = anchor_size * anchor_ratio[1]
+
+            X, Y = np.meshgrid(np.arange(output_width), np.arange(output_height))
+            M[0, :, :, current_layer] = (X + 0.5) * H.down_scale - anchor_w / 2.  # xmin
+            M[1, :, :, current_layer] = (Y + 0.5) * H.down_scale - anchor_h / 2.  # ymin
+            M[2, :, :, current_layer] = anchor_w
+            M[3, :, :, current_layer] = anchor_h
+
+            M[0, :, :, current_layer] = np.maximum(0, M[0, :, :, current_layer])
+            M[1, :, :, current_layer] = np.maximum(0, M[1, :, :, current_layer])
+
+            current_layer += 1
+            # idx_anchor = idx_anchor_size * len(anchor_ratios) + idx_anchor_ratio
+            #
+            # for fx in range(output_width):
+            #     # self.down_scale * (fx + 0.5) is the center_x of the anchor box
+            #     anchor_xmin = H.down_scale * (fx + 0.5) - anchor_w / 2
+            #     anchor_xmax = H.down_scale * (fx + 0.5) + anchor_w / 2
+            #
+            #     # anchor xmin or xmax exceeds the image
+            #     if anchor_xmin < 0 or anchor_xmax > resized_width:
+            #         continue
+            #     for fy in range(output_height):
+            #         anchor_ymin = H.down_scale * (fy + 0.5) - anchor_h / 2
+            #         anchor_ymax = H.down_scale * (fy + 0.5) + anchor_h / 2
+            #
+            #         if anchor_ymin < 0 or anchor_ymax > resized_height:
+            #             continue
+            #
+            #         anchor_cx = (anchor_xmin + anchor_xmax) / 2.0
+            #         anchor_cy = (anchor_ymin + anchor_ymax) / 2.0
+            #         M[0, fy, fx, start:start + 4] = [anchor_cx, anchor_cy, anchor_w, anchor_h]
+    return M
+
+
 def get_new_img_size(width, height, img_min_side):
     if width <= height:
         f = float(img_min_side) / width
@@ -73,25 +144,17 @@ class TrainDataGenerator(object):
             for img_data in self.annotation_data:
                 file_path = img_data.get('file_path')
 
-                x_img = cv2.imread(file_path)
+                x_img, w, h, resized_w, resized_h = process_image(file_path)
                 if x_img is None:
                     print("error: reading image {} failed.".format(file_path))
                     continue
-
-                h, w = x_img.shape[:2]
-                resized_w, resized_h = get_new_img_size(w, h, img_min_side=H.min_img_width)
-
-                # prepare X
-                x_img = cv2.resize(x_img, (resized_w, resized_h))
-                x_img = cv2.cvtColor(x_img, cv2.COLOR_BGR2RGB)
-                x_img = np.expand_dims(x_img, axis=0)
-                x_img = imagenet_utils.preprocess_input(x_img, mode='tf')
 
                 # prepare Y
                 # now calculates the rpn gt cls and regression box
                 y_rpn_cls, y_rpn_regr = self.calc_rpn_gt(resized_w, resized_h, w, h, img_data['bboxes'])
 
-                y_rpn_regr[:, y_rpn_regr.shape[1]//2:, :, :] *= 4.0  # scaling the regression target, i don't know why
+                # scaling the regression target, i don't know why TODO
+                y_rpn_regr[:, y_rpn_regr.shape[1]//2:, :, :] *= H.std_scaling
 
                 # change shape to NWHC format
                 y_rpn_cls = np.transpose(y_rpn_cls, (0, 2, 3, 1))

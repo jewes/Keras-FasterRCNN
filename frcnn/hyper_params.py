@@ -17,4 +17,6 @@ class HyperParams(object):
         self.rpn_min_overlap = 0.3
         self.rpn_max_overlap = 0.7
 
+        self.std_scaling = 4.0
+
 H = HyperParams()

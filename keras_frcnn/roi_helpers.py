@@ -22,6 +22,7 @@ def calc_iou(R, img_data, C, class_mapping):
 
     gta = np.zeros((len(bboxes), 4))
 
+    # convert ground truth boxes to feature map scale
     for bbox_num, bbox in enumerate(bboxes):
         # get the GT box coordinates, and resize to account for image resizing
         gta[bbox_num, 0] = int(round(bbox['x1'] * (resized_width / float(width))/C.rpn_stride))
@@ -35,6 +36,7 @@ def calc_iou(R, img_data, C, class_mapping):
     y_class_regr_label = []
     IoUs = [] # for debugging only
 
+    # R.shape[0] is the number of proposing boxes
     for ix in range(R.shape[0]):
         (x1, y1, x2, y2) = R[ix, :]
         x1 = int(round(x1))
@@ -42,6 +44,8 @@ def calc_iou(R, img_data, C, class_mapping):
         x2 = int(round(x2))
         y2 = int(round(y2))
 
+        # calculate the iou of the current box and the all the ground truth boxes, to check if they overlap.
+        # 找到当前box的定位，它负责预测哪个ground truth object
         best_iou = 0.0
         best_bbox = -1
         for bbox_num in range(len(bboxes)):
@@ -69,6 +73,7 @@ def calc_iou(R, img_data, C, class_mapping):
                 cx = x1 + w / 2.0
                 cy = y1 + h / 2.0
 
+                # 计算regression target
                 tx = (cxg - cx) / float(w)
                 ty = (cyg - cy) / float(h)
                 tw = np.log((gta[best_bbox, 1] - gta[best_bbox, 0]) / float(w))
@@ -77,10 +82,13 @@ def calc_iou(R, img_data, C, class_mapping):
                 print('roi = {}'.format(best_iou))
                 raise RuntimeError
 
+        # create the one-hot encoding class
         class_num = class_mapping[cls_name]
         class_label = len(class_mapping) * [0]
         class_label[class_num] = 1
         y_class_num.append(copy.deepcopy(class_label))
+
+        # regression is also one-hot, [facepalm]
         coords = [0] * 4 * (len(class_mapping) - 1)
         labels = [0] * 4 * (len(class_mapping) - 1)
         if cls_name != 'bg':
@@ -99,7 +107,7 @@ def calc_iou(R, img_data, C, class_mapping):
 
     X = np.array(x_roi)
     Y1 = np.array(y_class_num)
-    Y2 = np.concatenate([np.array(y_class_regr_label),np.array(y_class_regr_coords)],axis=1)
+    Y2 = np.concatenate([np.array(y_class_regr_label), np.array(y_class_regr_coords)],axis=1)
 
     return np.expand_dims(X, axis=0), np.expand_dims(Y1, axis=0), np.expand_dims(Y2, axis=0), IoUs
 
@@ -131,6 +139,12 @@ def apply_regr(x, y, w, h, tx, ty, tw, th):
 
 
 def apply_regr_np(X, T):
+    """
+    X[0:4] = xmin, ymin, w, h
+    :param X:
+    :param T:
+    :return:
+    """
     try:
         x = X[0, :, :]
         y = X[1, :, :]
@@ -229,8 +243,7 @@ def non_max_suppression_fast(boxes, probs, overlap_thresh=0.9, max_boxes=300):
         overlap = area_int/(area_union + 1e-6)
 
         # delete all indexes from the index list that have
-        idxs = np.delete(idxs, np.concatenate(([last],
-            np.where(overlap > overlap_thresh)[0])))
+        idxs = np.delete(idxs, np.concatenate(([last], np.where(overlap > overlap_thresh)[0])))
 
         if len(pick) >= max_boxes:
             break
@@ -241,7 +254,7 @@ def non_max_suppression_fast(boxes, probs, overlap_thresh=0.9, max_boxes=300):
     return boxes, probs
 
 
-def rpn_to_roi(rpn_layer, regr_layer, C, dim_ordering, use_regr=True, max_boxes=300,overlap_thresh=0.9):
+def rpn_to_roi(rpn_layer, regr_layer, C, dim_ordering, use_regr=True, max_boxes=300, overlap_thresh=0.9):
     """
     anchor在feature_map scale的的长宽是固定的，这个函数是将rpn返回的anchor，转成roi，
     去掉了object_ness = 0 的 anchor，并用nms做进一步的过滤。
@@ -283,8 +296,8 @@ def rpn_to_roi(rpn_layer, regr_layer, C, dim_ordering, use_regr=True, max_boxes=
     for anchor_size in anchor_sizes:
         for anchor_ratio in anchor_ratios:
 
-            anchor_x = (anchor_size * anchor_ratio[0])/C.rpn_stride  # anchor 缩放到 feature map上长度
-            anchor_y = (anchor_size * anchor_ratio[1])/C.rpn_stride  # anchor 缩放到 feature map上高度
+            anchor_w = (anchor_size * anchor_ratio[0])/C.rpn_stride  # anchor 缩放到 feature map上长度
+            anchor_h = (anchor_size * anchor_ratio[1])/C.rpn_stride  # anchor 缩放到 feature map上高度
             if dim_ordering == 'th':
                 regr = regr_layer[0, 4 * curr_layer:4 * curr_layer + 4, :, :]
             else:
@@ -309,16 +322,16 @@ def rpn_to_roi(rpn_layer, regr_layer, C, dim_ordering, use_regr=True, max_boxes=
 
             # 计算anchor在每个cell上的xywh
             # A.shape = [4, row, cols, num_anchor]
-            A[0, :, :, curr_layer] = X - anchor_x/2  # x
-            A[1, :, :, curr_layer] = Y - anchor_y/2  # y
-            A[2, :, :, curr_layer] = anchor_x        # w
-            A[3, :, :, curr_layer] = anchor_y        # h
+            A[0, :, :, curr_layer] = X - anchor_w/2  # x
+            A[1, :, :, curr_layer] = Y - anchor_h/2  # y
+            A[2, :, :, curr_layer] = anchor_w        # w
+            A[3, :, :, curr_layer] = anchor_h        # h
 
             if use_regr:
                 A[:, :, :, curr_layer] = apply_regr_np(A[:, :, :, curr_layer], regr)
 
             # 将xywh -> xmin, ymin, xmax, ymax
-            A[2, :, :, curr_layer] = np.maximum(1, A[2, :, :, curr_layer])
+            A[2, :, :, curr_layer] = np.maximum(1, A[2, :, :, curr_layer])  # 确保w,h 不小于1
             A[3, :, :, curr_layer] = np.maximum(1, A[3, :, :, curr_layer])
             A[2, :, :, curr_layer] += A[0, :, :, curr_layer]
             A[3, :, :, curr_layer] += A[1, :, :, curr_layer]
@@ -330,7 +343,7 @@ def rpn_to_roi(rpn_layer, regr_layer, C, dim_ordering, use_regr=True, max_boxes=
             A[3, :, :, curr_layer] = np.minimum(rows-1, A[3, :, :, curr_layer])
 
             curr_layer += 1
-
+    # A -> N, h, w, (xmin,ymin,xmax,ymax)
     # A.transpose -> 转置维4行xn列（n=num_anchor*rows*cols），然后再转置成n行x4列
     all_boxes = np.reshape(A.transpose((0, 3, 1, 2)), (4, -1)).transpose((1, 0))
     all_probs = rpn_layer.transpose((0, 3, 1, 2)).reshape((-1))  # 转置成1维
@@ -346,6 +359,4 @@ def rpn_to_roi(rpn_layer, regr_layer, C, dim_ordering, use_regr=True, max_boxes=
     all_boxes = np.delete(all_boxes, idxs, 0)
     all_probs = np.delete(all_probs, idxs, 0)
 
-    result = non_max_suppression_fast(all_boxes, all_probs, overlap_thresh=overlap_thresh, max_boxes=max_boxes)[0]
-
-    return result
+    return non_max_suppression_fast(all_boxes, all_probs, overlap_thresh=overlap_thresh, max_boxes=max_boxes)[0]

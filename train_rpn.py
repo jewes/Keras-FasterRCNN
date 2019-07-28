@@ -14,6 +14,7 @@ if __name__ == '__main__':
     model_rpn.compile(optimizer=Adam(lr=1e-5),
                       loss=[losses.rpn_loss_cls(H.num_anchor),
                             losses.rpn_loss_regr(H.num_anchor)])
+    print(model_rpn.metrics_names)
 
     train_datagen = TrainDataGenerator("dataset").get_train_datagen()
     for idx_epoch in range(num_epochs):
@@ -26,3 +27,5 @@ if __name__ == '__main__':
             step += 1
 
         print('Epoch {}, rpn_loss = {}'.format(idx_epoch + 1, loss_rpn))
+
+    model_rpn.save("rpn_model.h5")
